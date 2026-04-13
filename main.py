@@ -1,6 +1,11 @@
 import os
+import time
+import hmac
+import hashlib
+import requests
+import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, HTTPException
 import uvicorn
 from github import Github
 from openai import AsyncOpenAI
@@ -9,14 +14,45 @@ load_dotenv()
 
 app = FastAPI()
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
+GITHUB_PRIVATE_KEY = os.getenv("GITHUB_PRIVATE_KEY").replace("\\n", "\n")
+GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/llama-4-scout:free")
 
-gh = Github(GITHUB_TOKEN)
 ai_client = AsyncOpenAI(
     api_key=OPENAI_API_KEY,
     base_url="https://openrouter.ai/api/v1"
 )
+
+
+def verify_signature(payload_bytes: bytes, signature: str) -> bool:
+    """Проверяет подпись вебхука от GitHub."""
+    if not GITHUB_WEBHOOK_SECRET:
+        return True
+    mac = hmac.new(GITHUB_WEBHOOK_SECRET.encode(), payload_bytes, hashlib.sha256)
+    expected = f"sha256={mac.hexdigest()}"
+    return hmac.compare_digest(expected, signature or "")
+
+
+def get_installation_token(installation_id: int) -> str:
+    """Получает временный токен для конкретной установки GitHub App."""
+    payload = {
+        "iat": int(time.time()) - 60,
+        "exp": int(time.time()) + 540,
+        "iss": GITHUB_APP_ID
+    }
+    encoded_jwt = jwt.encode(payload, GITHUB_PRIVATE_KEY, algorithm="RS256")
+
+    resp = requests.post(
+        f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+        headers={
+            "Authorization": f"Bearer {encoded_jwt}",
+            "Accept": "application/vnd.github+json"
+        }
+    )
+    resp.raise_for_status()
+    return resp.json()["token"]
 
 
 def get_review_style(pr) -> str:
@@ -29,7 +65,6 @@ def get_review_style(pr) -> str:
 
 def build_prompt(task_description: str, code_changes: str, style: str) -> str:
     """Собирает промпт в зависимости от стиля ревью."""
-
     if style == "detailed":
         instruction = """ИНСТРУКЦИЯ (развёрнутый режим):
 1. Подробно проанализируй, решает ли код поставленную задачу.
@@ -58,7 +93,16 @@ def build_prompt(task_description: str, code_changes: str, style: str) -> str:
 
 
 @app.post("/github-webhook")
-async def github_webhook(request: Request, x_github_event: str = Header(None)):
+async def github_webhook(
+    request: Request,
+    x_github_event: str = Header(None),
+    x_hub_signature_256: str = Header(None)
+):
+    payload_bytes = await request.body()
+
+    # Проверка подписи
+    if not verify_signature(payload_bytes, x_hub_signature_256):
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     if x_github_event == "ping":
         return {"message": "Pong!"}
@@ -67,13 +111,15 @@ async def github_webhook(request: Request, x_github_event: str = Header(None)):
         payload = await request.json()
         action = payload.get("action")
 
-        # Реагируем на открытие, обновление PR, а также на добавление лейбла
         if action in ["opened", "synchronize", "labeled"]:
             repo_name = payload.get("repository", {}).get("full_name")
             pr_number = payload.get("pull_request", {}).get("number")
+            installation_id = payload.get("installation", {}).get("id")
 
             try:
-                repo = gh.get_repo(repo_name)
+                # Получаем токен через GitHub App
+                token = get_installation_token(installation_id)
+                repo = Github(token).get_repo(repo_name)
                 pr = repo.get_pull(pr_number)
 
                 task_description = pr.body or "Описание задачи отсутствует."
@@ -81,7 +127,7 @@ async def github_webhook(request: Request, x_github_event: str = Header(None)):
                 files = pr.get_files()
                 code_changes = ""
                 for file in files:
-                    if file.patch:  # patch может быть None для бинарных файлов
+                    if file.patch:
                         code_changes += f"\n--- Файл: {file.filename} ---\n{file.patch}\n"
 
                 if not code_changes:
@@ -95,7 +141,7 @@ async def github_webhook(request: Request, x_github_event: str = Header(None)):
                 prompt = build_prompt(task_description, code_changes, style)
 
                 response = await ai_client.chat.completions.create(
-                    model=os.getenv("MODEL_NAME", "meta-llama/llama-4-scout:free"),
+                    model=MODEL_NAME,
                     messages=[{"role": "user", "content": prompt}]
                 )
                 ai_review = response.choices[0].message.content
