@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pygithub
+openai
+python-dotenv
+PyJWT
+cryptography
+requests
