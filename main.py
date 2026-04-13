@@ -95,7 +95,7 @@ async def github_webhook(request: Request, x_github_event: str = Header(None)):
                 prompt = build_prompt(task_description, code_changes, style)
 
                 response = await ai_client.chat.completions.create(
-                    model="meta-llama/llama-3-8b-instruct:free",
+                    model=os.getenv("MODEL_NAME", "meta-llama/llama-4-scout:free"),
                     messages=[{"role": "user", "content": prompt}]
                 )
                 ai_review = response.choices[0].message.content
