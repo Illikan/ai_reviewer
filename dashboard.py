@@ -41,12 +41,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div style="max-width:800px;margin:0 auto;">
-  <h1>🤖 AI Code Reviewer</h1>
+  <h1>AI Code Reviewer</h1>
   <p class="subtitle">Панель преподавателя</p>
 
   <!-- Голосовой комментарий -->
   <div class="card">
-    <h2>🎤 Добавить голосовой комментарий к ревью</h2>
+    <h2>Добавить голосовой комментарий к ревью</h2>
 
     <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px;">
       Выберите PR:
@@ -71,7 +71,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Последние ревью -->
   <div class="card">
-    <h2>📋 Последние автоматические ревью</h2>
+    <h2>Последние автоматические ревью</h2>
     <div id="reviewsList"><p class="empty">Ревью ещё не поступали</p></div>
   </div>
 </div>
@@ -130,7 +130,7 @@ async function startRecording() {
     document.getElementById('recordBtn').classList.add('recording');
     document.getElementById('btnIcon').textContent = '⏹';
     document.getElementById('btnText').textContent = 'Остановить запись';
-    setStatus('🔴 Идёт запись...', '');
+    setStatus('Идёт запись...', '');
   } catch (e) {
     setStatus('Ошибка доступа к микрофону: ' + e.message, 'error');
   }
@@ -142,7 +142,7 @@ function stopRecording() {
   document.getElementById('recordBtn').classList.remove('recording');
   document.getElementById('btnIcon').textContent = '🎤';
   document.getElementById('btnText').textContent = 'Начать запись';
-  setStatus('⏳ Расшифровываю...', '');
+  setStatus('Расшифровываю...', '');
 }
 
 async function transcribeAudio(blob) {
@@ -155,7 +155,7 @@ async function transcribeAudio(blob) {
   if (data.text) {
     document.getElementById('transcriptArea').value = data.text;
     document.getElementById('sendBtn').disabled = false;
-    setStatus('✅ Расшифровка готова. Проверьте текст и отправьте.', 'success');
+    setStatus('Расшифровка готова. Проверьте текст и отправьте.', 'success');
   } else {
     setStatus('Ошибка расшифровки: ' + (data.error || 'неизвестно'), 'error');
   }
@@ -172,7 +172,7 @@ async function sendVoiceReview() {
 
   const [repo, prNumber, installationId] = selected.split('|');
   document.getElementById('sendBtn').disabled = true;
-  setStatus('⏳ Генерирую комментарий в стиле преподавателя...', '');
+  setStatus('Генерирую комментарий в стиле преподавателя...', '');
 
   const resp = await fetch('/api/voice-review', {
     method: 'POST',
@@ -184,7 +184,7 @@ async function sendVoiceReview() {
 
   const data = await resp.json();
   if (data.success) {
-    setStatus('✅ Комментарий отправлен в PR!', 'success');
+    setStatus('Комментарий отправлен в PR!', 'success');
     document.getElementById('transcriptArea').value = '';
   } else {
     setStatus('Ошибка: ' + (data.error || 'неизвестно'), 'error');
